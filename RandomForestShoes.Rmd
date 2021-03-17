@@ -1,0 +1,67 @@
+---
+title: "RandomForest"
+author: "Jenny"
+date: "March 17, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(randomForest)
+library(ISLR)
+library(tree)
+library("readxl")
+library(party)
+data <- read_excel("data.xls")
+View(data)
+
+```
+
+
+
+```{r}
+#basic statistics of the data
+head(data)
+summary(data)
+hist(data$Prijs)
+
+#we want to make a tree
+#we first give the chart file a name
+png(file = "decision_tree.png")
+
+# Create the tree.
+output.tree <- ctree(
+  Prijs ~ Type + Shop + On_Sale + For + Color, 
+  data = data)
+```
+
+
+```{r cars}
+#For random forests
+
+library(dplyr)
+data=data %>% mutate_if(is.character, as.factor)
+#we will now split the dataset into train and validation set in the ratio 70:30
+set.seed(100)
+train <- sample(nrow(data), 0.7*nrow(data), replace = FALSE)
+TrainSet <- data[train,]
+ValidSet <- data[-train,]
+summary(TrainSet)
+summary(ValidSet)
+length(TrainSet)
+length(ValidSet)
+
+```
+
+```{r}
+#Create a random forest with the default parameters
+model1 <- randomForest(Prijs ~ ., data = TrainSet, importance = TRUE)
+model1
+
+
+
+```
+
+
+
+

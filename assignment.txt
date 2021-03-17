@@ -1,0 +1,11 @@
+** Analyze and predict price of shoes (data set on BS) ** 
+	
+	- Split the data on training and test (70% /30%).
+	- Build a tree model, perform bagging and Random Forest
+	- Discuss choices of parameters of these models. Is it the case that the default choices lead to the best performing model? Present discussion of your findings.
+	- Compare performance of your models on training and test data.
+	- Analyze variable importance and give a discussion.
+	- Provide a discussion about fitted models from the perspective of simplicity interpretability, easiness of fitting, accuracy etc.
+	- Submit your report and implementation via BS.
+
+Deadline 02.04.2021.

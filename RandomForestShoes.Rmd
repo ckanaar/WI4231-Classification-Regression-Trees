@@ -2,7 +2,10 @@
 title: "RandomForest"
 author: "Jenny"
 date: "March 17, 2021"
-output: html_document
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -12,8 +15,19 @@ library(ISLR)
 library(tree)
 library("readxl")
 library(party)
+library(dtree)
+library(dplyr)
+library(caret)
+library(e1071)
+library(ggplot2)
+library(cowplot)
+library(rsample)
+library(rpart)
+library(rpart.plot)
+library(ipred)
+
 data <- read_excel("data.xls")
-View(data)
+#View(data)
 
 ```
 
@@ -25,43 +39,229 @@ head(data)
 summary(data)
 hist(data$Prijs)
 
+out <- dtree(
+  Prijs ~ Type + Shop + On_Sale + For + Color +Known_Brand + Leather, 
+  data = data, methods = c("tree"))
+data=data %>% mutate_if(is.character, as.factor)
+#check if the data is in the correct format
+str(data)
+
 #we want to make a tree
 #we first give the chart file a name
 png(file = "decision_tree.png")
 
-# Create the tree.
+# Create the tree, this is a classification tree of the entire data set
 output.tree <- ctree(
   Prijs ~ Type + Shop + On_Sale + For + Color, 
   data = data)
+
+#plot the tree
+plot(output.tree)
+
+#save the file
+dev.off
+
 ```
 
 
 ```{r cars}
-#For random forests
+#For Decision trees
 
-library(dplyr)
-data=data %>% mutate_if(is.character, as.factor)
+
 #we will now split the dataset into train and validation set in the ratio 70:30
 set.seed(100)
 train <- sample(nrow(data), 0.7*nrow(data), replace = FALSE)
-TrainSet <- data[train,]
+TrainSet <- data[train,] 
 ValidSet <- data[-train,]
 summary(TrainSet)
 summary(ValidSet)
 length(TrainSet)
 length(ValidSet)
 
+
+
+#Create the tree using the training data set 
+jpeg("TreeofTraining data.jpg", width = 6800, height = 1800)
+modelontraining <- ctree(Prijs ~ Type + Shop + On_Sale + For + Known_Brand + Leather + Color, 
+  data = TrainSet)
+plot(modelontraining, type = 'simple')
+dev.off()
+
+
+#Predict new data
+ValidSet$response = predict(modelontraining, newdata = ValidSet, type = 'response')
+
+ValidSet$prob = predict(modelontraining, newdata = ValidSet, type = 'prob')
+ValidSet$node =predict(modelontraining, newdata = ValidSet, type = 'response')
 ```
+
+
+
+
+
+```{r}
+library(ROCR)
+#If we want to see how good the model is, we can use an ROC curve. It does not use thresholds to classify,
+#as it uses the predicted probabilities as they are
+# plot ROC
+#roc_pred <- prediction(ValidSet$prob, ValidSet$Prijs)
+#perf <- performance(roc_pred, "tpr", "fpr")
+#plot(perf, col="red")
+#abline(0,1,col="grey")
+
+# get area under the curve
+#performance(roc_pred,"auc")@Prijs.values
+
+
+
+```
+Diffrent way of making a regression tree using rpart and visualizing it using rpart.plot
+
+CASPER GA HIER MAAR BEGINNEN MET LEZEN IK DENK DAT HET WEL EEN BEETJE DUIDELIJK IS ;)
+
+```{r}
+
+#we fit a regression tree using rpart, when fitting a regression tree we need to set the anova method
+m1 <- rpart(formula = Prijs ~., data = TrainSet, method = "anova")
+m1
+rpart.plot(m1)
+plotcp(m1) #in this plot the yaxis is the cross validation error, lower xaxis is the cost complexity alfa value
+#upper x axis is the number of terminal nodes, so the tree size |T|. In the plot you see that the dashed line goes through the point |T| = 10, so it suggests that in actual practice, its common to instead use the smallest tree within 1 standard deviation of the minimum cross validation error. So we could use a tree with 10 terminal nodes and expect to have similar results within a small margin of error. 
+```
+
+We see from the data that we start with 4636 observations at the root node and in the first variable that we split is Type (so the first variable that optimizes a reduction in SSE) is Type. And that all observations with sandals, sneakers and wedges go into the 2nd branch, which has a total of 2927 observations, their average sale price is 72.74525 and the SSE is 8533299.0
+
+Where SSE = overall sums of squares errors that are minimized. 
+
+In the plot we see that it shows the percentage of data that fall to that node and the average sales price for that branch. 
+Rpart automatically applies a range of cost complexity (alfa values) to prune the tree. To compare the error for each alfa value, rpart performs a 10fold cross validation so that the error associated with a given alfa value is computed on the hold-out validation data. 
+
+
+TO illustrate why we select a tree with 11 terminal nodes instead of 10, if you would go by the 1 SE = 1 standard error rule, we can force rpart to generate a full tree by using cp =0 (no penalty results into a fully grown tree)
+
+
+```{r}
+
+m2 <- rpart(formula = Prijs ~., data = TrainSet, method = "anova", control = list(cp = 0, xval = 10))
+plotcp(m2)
+abline(v = 11, lty = 'dashed')
+
+```
+
+What we see in this plot is that after 11 terminal nodes, we see diminishing returns in error reduction as the tree grows deeper, so we can prune our tree significantly and still achieve the minimal expected error. It's not needed to use more than 11 terminal nodes. That is what rpart does using automated tuning. 
+
+We see that we have an optimal subtree of 10 splits, 11 terminal nodes, and a cross validated error of 0.2831666. 
+```{r}
+
+m1$cptable
+```
+
+We can do more to make the answer better. So instead of only tuning the cost complexity alfa parameter, it is also common to tune, the minimum number of data points required to attempt a split before it is forced to create a terminal node. The default is 20. Making this smaller allows for terminal nodes that may contain only a handful of observations to create the predicted value. (so we specify a smaller number of datapoints)
+Also, maxdepth which is the maximum number of internal nodes between the root node and the terminal nodes, the default is 30, so you can build quite large trees. So create a third model.
+WE get an error  of 0.2840078 in this case, which is not really better.
+```{r}
+m3 <-rpart(formula = Prijs ~., data = TrainSet, method = "anova", control = list(minsplit =9, maxdepth = 11, xval = 10))
+m3$cptable
+
+
+```
+So set up a grid search, so select a range of minsplit from 5-20 and vary maxdepth from 7-14 (ours was 11) so we try 128 different combinations.
+```{r}
+hyper_grid <- expand.grid(
+  minsplit = seq(5, 20, 1),
+  maxdepth = seq(7, 14, 1)
+)
+
+head(hyper_grid)
+# total number of combinations
+nrow(hyper_grid)
+
+
+models <- list()
+
+for (i in 1:nrow(hyper_grid)) {
+  
+  # get minsplit, maxdepth values at row i
+  minsplit <- hyper_grid$minsplit[i]
+  maxdepth <- hyper_grid$maxdepth[i]
+
+  # train a model and store in the list
+  models[[i]] <- rpart(
+    formula = Prijs ~ .,
+    data    = TrainSet,
+    method  = "anova",
+    control = list(minsplit = minsplit, maxdepth = maxdepth)
+    )
+}
+# function to get optimal cp
+get_cp <- function(x) {
+  min    <- which.min(x$cptable[, "xerror"])
+  cp <- x$cptable[min, "CP"] 
+}
+
+# function to get minimum error
+get_min_error <- function(x) {
+  min    <- which.min(x$cptable[, "xerror"])
+  xerror <- x$cptable[min, "xerror"] 
+}
+
+hyper_grid %>%
+  mutate(
+    cp    = purrr::map_dbl(models, get_cp),
+    error = purrr::map_dbl(models, get_min_error)
+    ) %>%
+  arrange(error) %>%
+  top_n(-5, wt = error)
+
+
+optimal_tree <- rpart(
+    formula = Prijs ~ .,
+    data    = TrainSet,
+    method  = "anova",
+    control = list(minsplit = 10, maxdepth = 11, cp = 0.01)
+    )
+#so the default did make the best prediction in our case
+pred <- predict(optimal_tree, newdata = ValidSet)
+RMSE(pred = pred, obs = ValidSet$Prijs)
+```
+
+
+
+
 
 ```{r}
 #Create a random forest with the default parameters
-model1 <- randomForest(Prijs ~ ., data = TrainSet, importance = TRUE)
+#Note that the variable "ntree" means the number of trees to grow and "mtry" is the number of variables
+#that is randomly sampled at each stage, so the number of variables sampled as candidates at each split
+
+model1 <- randomForest(Prijs ~ ., data = TrainSet, trace = TRUE,importance = TRUE, proximity = TRUE)
 model1
 
 
 
+
+
+model2 <- randomForest(Prijs ~ ., data = TrainSet, ntree = 500, mtry = 6, importance = TRUE)
+model2
+
+```
+Let us now try to predict on the trained dataset first and then predict on the validation dataset
+
+
+```{r}
+#Let's try to predict on the trained data set
+predictrain <- predict(model2, TrainSet) #type = "class")
+#Check the classification accuracy
+table(predictrain, TrainSet$Prijs)
+
 ```
 
-
+```{r}
+#Random forest like statquest
+set.seed(42)
+#Build the random forest using the entire
+model <- randomForest(Prijs ~., data = TrainSet, proximity = TRUE)
+model
+```
 
 

@@ -24,6 +24,8 @@ library(cowplot)
 library(rsample)
 library(rpart)
 library(rpart.plot)
+library(ranger)
+library(h2o)
 library(ipred)
 
 data <- read_excel("data.xls")
@@ -226,17 +228,59 @@ RMSE(pred = pred, obs = ValidSet$Prijs)
 ```
 
 
+therefore the final RMSE is 57.40103, which suggests that on average the predicted price is about 57.40103 off from the actual price.
+We will now continue with bagging.
+
+Bagging combines and averages multiple models. Averaging across multiple trees reduces the variability of any one tree and reduces overfitting, which improves predictive performance.
+We perform a 10-fold cross validated model.
+
+```{r}
+#Let's start bagging ;)
+
+#specify the 10-fold cross-validation, you can change it to any other number of cross validation
+ctrl <-trainControl(method = "cv", number =10)
+# CV bagged model
+bagged_cv <- train(
+  Prijs ~ .,
+  data = TrainSet,
+  method = "treebag",
+  trControl = ctrl,
+  importance = TRUE
+  )
+
+# assess results
+bagged_cv
+
+# plot most important variables
+plot(varImp(bagged_cv))  
+
+#Compare the bagged tree to the validation set 
+pred <- predict(bagged_cv, ValidSet)
+RMSE(pred, ValidSet$Prijs)
+```
+Here we get that the 10-fold cross validated RMSE is 54.11242. We also assess the variable importance. THe variable importance is measured by assssing the total amount of SSE decreased by splits over a given predictor, averaged over all the m trees. The predictors with the largest average impact to the SSE are considered most important. THe importance value is the relative mean decrease in SSE compared to the most important variable (on a 0-100 scale), now we obtain a RMSE of 55.10733.
+
+RMSE = Root Mean Square Error
 
 
+Now RANDOM FOREST TIME!
+Bagging trees introduces a random component in the tree building process that reduces the variance of a single tree's prediction and improves predictive performace. However, the trees in bagging are not completely independent of each other since all the original predictors are considered at every split of every tree. So trees from different bootstrap samples have similar structure to each other due to underlying relationships between the predictors.
+(predictors are the xvalues so in this case the type, gender etc.)
+We obtain that the MSE = 2695.593, so RMSE = sqrt(2695.593)
 
 ```{r}
 #Create a random forest with the default parameters
 #Note that the variable "ntree" means the number of trees to grow and "mtry" is the number of variables
 #that is randomly sampled at each stage, so the number of variables sampled as candidates at each split
+#for reproducibility
+set.seed(123) 
 
 model1 <- randomForest(Prijs ~ ., data = TrainSet, trace = TRUE,importance = TRUE, proximity = TRUE)
 model1
 
+RMSEmodel1 <-sqrt(model1$mse)
+plot(model1)
+#randomForest model takes as default 500 trees and splits 2 variables at each split.
 
 
 
@@ -245,6 +289,63 @@ model2 <- randomForest(Prijs ~ ., data = TrainSet, ntree = 500, mtry = 6, import
 model2
 
 ```
+
+Plotting the model illustrates the error rate as we average across more trees and shows that the errror ratee stabilizes around 100 trees and slightly decreases until around 500 trees. The plotted error rate is based on the OOB sample error and can be found using model1$mse. So we f can find the number of trees providing the lowest error rate. 
+In this case 414 trees provides the lowest error rate and the average price is 51.86694.
+
+```{r}
+# number of trees with lowest MSE
+which.min(model1$mse)
+
+# RMSE of this optimal random forest
+sqrt(model1$mse[which.min(model1$mse)])
+```
+
+
+Using random forests we can also use a validation set to measure the predictive accuracy if you do not want to use the OOB samples. The idea is to split the training data into a further set of training and validation set.
+
+
+```{r}
+# create training and validation data 
+set.seed(123)
+valid_split <- initial_split(TrainSet, .8)
+
+# training data
+data_train_v2 <- analysis(valid_split)
+
+# validation data
+data_valid <- assessment(valid_split)
+x_test <- data_valid[setdiff(names(data_valid), "Prijs")]
+y_test <- data_valid$Prijs
+
+rf_oob_comp <- randomForest(
+  formula = Prijs    ~ .,
+  data    = data_train_v2,
+  xtest   = x_test,
+  ytest   = y_test
+)
+
+# extract OOB & validation errors
+oob <- sqrt(rf_oob_comp$mse)
+validation <- sqrt(rf_oob_comp$test$mse)
+
+# compare error rates
+tibble::tibble(
+  `Out of Bag Error` = oob,
+  `Test error` = validation,
+  ntrees = 1:rf_oob_comp$ntree
+) %>%
+  gather(Metric, RMSE, -ntrees) %>%
+  ggplot(aes(ntrees, RMSE, color = Metric)) +
+  geom_line() +
+  scale_y_continuous(labels = scales::dollar) +
+  xlab("Number of trees")
+
+```
+
+
+
+
 Let us now try to predict on the trained dataset first and then predict on the validation dataset
 
 
